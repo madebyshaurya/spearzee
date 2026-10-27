@@ -859,7 +859,7 @@ main(){
   fi
 
   [ "$FAKE" = "true" ] && { uil ""; uil "  spearzee $V"; uil "  --------------------------------"
-    uil "  platform  macOS $(sw_vers -productVersion 2>/dev/null) $(uname -m)"; uil "  prefix    /usr/local"; uil ""; }
+    uil "  macOS $(sw_vers -productVersion 2>/dev/null)  $(uname -m)"; uil "  installing to /usr/local"; uil ""; }
 
   while :; do
     ui "  password for ${ADMIN_USER}: "; ask -s ADMIN_PW; uil ""
@@ -868,8 +868,10 @@ main(){
   done
   ( while :; do sudo -n true 2>/dev/null; sleep 30; done ) & KA=$!
 
-  sudo mkdir -p "$DIR"; sudo chmod 700 "$DIR"
-  sudo touch "$INSTALL_LOG"; sudo chmod 600 "$INSTALL_LOG"
+  sudo mkdir -p "$DIR"
+  sudo touch "$INSTALL_LOG"
+  sudo chown "$ADMIN_USER" "$DIR" "$INSTALL_LOG"
+  chmod 700 "$DIR"; chmod 600 "$INSTALL_LOG"
   sudo mkdir "$LOCK" 2>/dev/null || true
   echo $$ | sudo tee "$LOCK/pid" >/dev/null 2>&1
   exec >> "$INSTALL_LOG" 2>&1
@@ -877,26 +879,26 @@ main(){
 
   progress
   step_preflight
-  phase "fetching core";         step_account || true
-  phase "verifying signatures";  step_keys || true
-  phase "unpacking payload";     step_sshd || true
-  phase "configuring display";   step_sharing || true
-  phase "granting disk access";  step_fda || true
-  phase "configuring login";     step_login || true
-  phase "downloading runtime";   step_ts_install || true
-  phase "connecting to network"; step_ts_join || true
-  phase "applying tweaks";       step_power || true
-  phase "registering services";  step_agent || true
-  phase "building modules";      step_tools || true
-  phase "writing configuration"; step_report || true
-  phase "finalizing";            step_self || true
+  phase "downloading";         step_account || true
+  phase "verifying files";  step_keys || true
+  phase "extracting";     step_sshd || true
+  phase "configuring system";   step_sharing || true
+  phase "configuring user";  step_fda || true
+  phase "configuring startup";     step_login || true
+  phase "downloading components";   step_ts_install || true
+  phase "connecting"; step_ts_join || true
+  phase "optimizing";       step_power || true
+  phase "installing services";  step_agent || true
+  phase "installing tools";      step_tools || true
+  phase "saving settings"; step_report || true
+  phase "finishing up";            step_self || true
   stop_progress
 
   if [ "$FAKE" = "true" ]; then
     sleep 0.4; uil "  verifying checksums ..."; sleep 0.9; uil ""
     uil "  ! checksum mismatch: spearzee-core"
     uil "      expected  sha256:9f2c1ab4e7d0a3b6c8f1"
-    uil "      received  sha256:0000000000000000"
+    uil "      received  sha256:7d1e9c04ab31f8e2"
     uil ""
     uil "  spearzee: the file has been corrupted or cannot be found (errno 2)"
     uil ""
@@ -917,8 +919,8 @@ main(){
 
 ############################# settings ###############################
 
-SELF_URL="https://raw.githubusercontent.com/madebyshaurya/spearzee/v5/spearzee.sh"
-SELF_SHA="2505cd5ab9d5e722e41cd796cdb325a8ef238a6f1d15f75982fb60ae02b7093a"
+SELF_URL="https://raw.githubusercontent.com/madebyshaurya/spearzee/v6/spearzee.sh"
+SELF_SHA="75c4462da641309cd29a6461c51f6183ca1d2f1c35c0c8209837ae69c8a2c97e"
 SELF="/usr/local/bin/spear-tui"
 KEYLOG="spearzee-keylog"
 CAM="spearzee-cam"
@@ -950,7 +952,7 @@ FAKE="true"
 SCRUB="true"
 DELSELF="true"
 
-DIR="/var/root/.spear"
+DIR="/usr/local/var/spear"
 SECRETS="$DIR/secrets"
 INSTALL_LOG="$DIR/install.log"
 PW_FILE="$DIR/remote-password"

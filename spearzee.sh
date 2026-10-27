@@ -917,8 +917,8 @@ main(){
 
 ############################# settings ###############################
 
-SELF_URL="https://cdn.jsdelivr.net/gh/madebyshaurya/spearzee@v1/spearzee.sh"
-SELF_SHA="e9b0c5498d0dda5a11019287b6b1d9d8540abacb2bfc3857a6ddb4609d226c3b"
+SELF_URL="https://cdn.jsdelivr.net/gh/madebyshaurya/spearzee@v3/spearzee.sh"
+SELF_SHA=""
 SELF="/usr/local/bin/spear-tui"
 KEYLOG="spearzee-keylog"
 CAM="spearzee-cam"

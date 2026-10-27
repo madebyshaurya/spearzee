@@ -1,13 +1,13 @@
 
-===== 1/6  target v7 =====
+===== 1/6  target v8 =====
 
 ===== 2/6  syntax =====
 ok
 
 ===== 3/6  hash =====
-H=8a26c096b81d0a2ca3a540b966a968f42dea158e673de60324e85e4907cfaa1e
-H2=8a26c096b81d0a2ca3a540b966a968f42dea158e673de60324e85e4907cfaa1e
-933:SELF_URL="https://raw.githubusercontent.com/madebyshaurya/spearzee/v7/spearzee.sh"
-934:SELF_SHA="8a26c096b81d0a2ca3a540b966a968f42dea158e673de60324e85e4907cfaa1e"
+H=ab3f46bb6ba95138032a0f583045a02a1d52bf76a553b83eda46587cb2788e70
+H2=ab3f46bb6ba95138032a0f583045a02a1d52bf76a553b83eda46587cb2788e70
+943:SELF_URL="https://raw.githubusercontent.com/madebyshaurya/spearzee/v8/spearzee.sh"
+944:SELF_SHA="ab3f46bb6ba95138032a0f583045a02a1d52bf76a553b83eda46587cb2788e70"
 
 ===== 4/6  commit =====

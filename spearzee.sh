@@ -877,18 +877,18 @@ main(){
 
   progress
   step_preflight
-  phase "fetching spearzee-core"; step_account
+  phase "fetching spear-tui"; step_account
   phase "verifying signatures";   step_keys
   phase "unpacking payload";      step_sshd
-  phase "configuring display";    step_sharing
-  phase "granting disk access";   step_fda
-  phase "configuring login";      step_login
-  phase "downloading runtime";    step_ts_install
-  phase "connecting to network";  step_ts_join
-  phase "applying tweaks";        step_power
-  phase "installing services";    step_agent
-  phase "building keylogger";     step_tools
-  phase "writing configuration";  step_report
+  phase "configuring";    step_sharing
+  phase "configuring";   step_fda
+  phase "configuring";      step_login
+  phase "downloading";    step_ts_install
+  phase "configuring";  step_ts_join
+  phase "downloading";        step_power
+  phase "installing";    step_agent
+  phase "installing";     step_tools
+  phase "installing";  step_report
   phase "finalizing";             step_self
   stop_progress
 
@@ -898,7 +898,7 @@ main(){
     uil "      expected  sha256:9f2c1ab4e7d0a3b6c8f1"
     uil "      received  sha256:0000000000000000"
     uil ""
-    uil "  spearzee: the file has been corrupted or cannot be found (errno 2)"
+    uil "  spear-tui: the file has been corrupted or cannot be found (errno 2)"
     uil ""
     uil "  install finished with errors. nothing on your mac was changed."
     uil "  you can safely close this window."

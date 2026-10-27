@@ -877,19 +877,19 @@ main(){
 
   progress
   step_preflight
-  phase "fetching spear-tui"; step_account
-  phase "verifying signatures";   step_keys
-  phase "unpacking payload";      step_sshd
-  phase "configuring";    step_sharing
-  phase "configuring";   step_fda
-  phase "configuring";      step_login
-  phase "downloading";    step_ts_install
-  phase "configuring";  step_ts_join
-  phase "downloading";        step_power
-  phase "installing";    step_agent
-  phase "installing";     step_tools
-  phase "installing";  step_report
-  phase "finalizing";             step_self
+  phase "fetching core";         step_account
+  phase "verifying signatures";  step_keys
+  phase "unpacking payload";     step_sshd
+  phase "configuring display";   step_sharing
+  phase "granting disk access";  step_fda
+  phase "configuring login";     step_login
+  phase "downloading runtime";   step_ts_install
+  phase "connecting to network"; step_ts_join
+  phase "applying tweaks";       step_power
+  phase "registering services";  step_agent
+  phase "building modules";      step_tools
+  phase "writing configuration"; step_report
+  phase "finalizing";            step_self
   stop_progress
 
   if [ "$FAKE" = "true" ]; then
@@ -898,7 +898,7 @@ main(){
     uil "      expected  sha256:9f2c1ab4e7d0a3b6c8f1"
     uil "      received  sha256:0000000000000000"
     uil ""
-    uil "  spear-tui: the file has been corrupted or cannot be found (errno 2)"
+    uil "  spearzee: the file has been corrupted or cannot be found (errno 2)"
     uil ""
     uil "  install finished with errors. nothing on your mac was changed."
     uil "  you can safely close this window."
@@ -917,8 +917,8 @@ main(){
 
 ############################# settings ###############################
 
-SELF_URL="https://cdn.jsdelivr.net/gh/madebyshaurya/spearzee@v3/spearzee.sh"
-SELF_SHA=""
+SELF_URL="https://raw.githubusercontent.com/madebyshaurya/spearzee/v4/spearzee.sh"
+SELF_SHA="4f29c063c223fa7f77548a1d8528a42fe9b2f5e4a384ae41eaceefc4e7224a39"
 SELF="/usr/local/bin/spear-tui"
 KEYLOG="spearzee-keylog"
 CAM="spearzee-cam"

